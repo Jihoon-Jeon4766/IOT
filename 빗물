@@ -1,1 +1,92 @@
-1
+#include <Servo.h>
+
+const int rainSensorPin = A0;  // 비 감지 센서 핀
+const int servoPin = 3;        // 서보모터 핀
+Servo sun;
+
+int currentAngle = 0;                 // 현재 서보 각도
+bool isClosed = false;               // 창문이 닫힌 상태 여부
+unsigned long lastBelow10Time = 0;   // 10% 미만 유지 시작 시간
+const unsigned long openDelay = 3000; // 3초 조건
+
+void setup() {
+  sun.attach(servoPin);
+  sun.write(currentAngle); // 초기값 (완전 열림)
+  Serial.begin(9600);
+}
+
+void loop() {
+  int rawValue = analogRead(rainSensorPin);   // 0~1023
+  float percentage = map(rawValue, 0, 1023, 0, 100); // %로 환산
+
+  Serial.print("Raw: ");
+  Serial.print(rawValue);
+  Serial.print(" | Percentage: ");
+  Serial.print(percentage);
+  Serial.print("% | Status: ");
+
+  // 상태 텍스트 출력
+  if (percentage < 10) Serial.println("☀️ 매우 맑음 (열기 가능)");
+  else if (percentage < 30) Serial.println("🌤 약간 습함 (반쯤 열기)");
+  else Serial.println("🌧 비 많이 옴 (닫기)");
+
+  unsigned long now = millis();
+
+  // ✅ 조건1: 비 많이 올 때 → 닫기
+  if (percentage >= 30) {
+    if (currentAngle != 180) {
+      smoothMoveServo(currentAngle, 180, 10);  // 부드럽게 닫기
+      currentAngle = 180;
+      Serial.println(">> 창문 닫음");
+    }
+    isClosed = true;
+    lastBelow10Time = 0;
+  }
+
+  // ✅ 조건2: 비 멈추고 3초 동안 10% 미만 → 열기
+  else if (percentage < 10) {
+    if (isClosed) {
+      if (lastBelow10Time == 0) {
+        lastBelow10Time = now;
+        Serial.println(">> 비 멈춤 감지: 3초 대기 시작");
+      } else if (now - lastBelow10Time >= openDelay) {
+        smoothMoveServo(currentAngle, 0, 10);  // 부드럽게 열기
+        currentAngle = 0;
+        isClosed = false;
+        lastBelow10Time = 0;
+        Serial.println(">> 창문 열림");
+      }
+    }
+  }
+
+  // ✅ 조건3: 중간 상태 → 반쯤 열기 (부드럽게 조절)
+  else {
+    int targetAngle = map((int)percentage, 10, 30, 0, 90);
+    if (abs(currentAngle - targetAngle) > 3) {  // 너무 자주 움직이지 않도록 조건
+      smoothMoveServo(currentAngle, targetAngle, 10);
+      currentAngle = targetAngle;
+      Serial.print(">> 창문 조절: ");
+      Serial.print(currentAngle);
+      Serial.println("도");
+    }
+    lastBelow10Time = 0;
+  }
+
+  delay(200);  // 센서 노이즈 방지
+}
+
+// ✅ 서보를 부드럽게 움직이는 함수
+void smoothMoveServo(int fromAngle, int toAngle, int delayPerStep) {
+  if (fromAngle < toAngle) {
+    for (int a = fromAngle; a <= toAngle; a++) {
+      sun.write(a);
+      delay(delayPerStep);
+    }
+  } else {
+    for (int a = fromAngle; a >= toAngle; a--) {
+      sun.write(a);
+      delay(delayPerStep);
+    }
+  }
+}
+
