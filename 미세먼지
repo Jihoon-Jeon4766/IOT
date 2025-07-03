@@ -1,0 +1,85 @@
+#include <Servo.h>
+
+const int dustSensorPin = A0;  // 미세먼지 센서 핀
+const int servoPin = 3;        // 서보모터 핀
+Servo sun;
+
+int currentAngle = 0;
+bool isClosed = false;
+unsigned long lastClearTime = 0;
+const unsigned long openDelay = 3000; // 3초
+
+void setup() {
+  sun.attach(servoPin);
+  sun.write(currentAngle); // 초기값 (완전 열림)
+  Serial.begin(9600);
+}
+
+void loop() {
+  int dustRaw = analogRead(dustSensorPin);          // 0~1023
+  float dustPct = map(dustRaw, 0, 1023, 0, 100);     // 비율 변환
+
+  Serial.print("🌫 Dust Raw: ");
+  Serial.print(dustRaw);
+  Serial.print(" | Dust %: ");
+  Serial.println(dustPct);
+
+  unsigned long now = millis();
+
+  // 1. 미세먼지 농도 높음 → 닫기
+  if (dustPct >= 40) {
+    if (currentAngle != 180) {
+      smoothMoveServo(currentAngle, 180, 10);
+      currentAngle = 180;
+      Serial.println(">> 미세먼지 나쁨: 창문 닫음");
+    }
+    isClosed = true;
+    lastClearTime = 0;
+  }
+
+  // 2. 미세먼지 매우 좋음 & 3초 이상 지속 → 열기
+  else if (dustPct < 20) {
+    if (isClosed) {
+      if (lastClearTime == 0) {
+        lastClearTime = now;
+        Serial.println(">> 미세먼지 좋아짐: 3초 대기 시작");
+      } else if (now - lastClearTime >= openDelay) {
+        smoothMoveServo(currentAngle, 0, 10);
+        currentAngle = 0;
+        isClosed = false;
+        lastClearTime = 0;
+        Serial.println(">> ✅ 공기 깨끗함: 창문 열림");
+      }
+    }
+  }
+
+  // 3. 중간 농도 → 반쯤 열기
+  else {
+    int targetAngle = map((int)dustPct, 20, 40, 0, 90);  // 20%→0도, 40%→90도
+    if (abs(currentAngle - targetAngle) > 3) {
+      smoothMoveServo(currentAngle, targetAngle, 10);
+      currentAngle = targetAngle;
+      Serial.print(">> 공기 보통: 창문 각도 ");
+      Serial.print(currentAngle);
+      Serial.println("도");
+    }
+    lastClearTime = 0;
+  }
+
+  delay(300);  // 노이즈 방지
+}
+
+// 부드러운 서보 회전 함수
+void smoothMoveServo(int fromAngle, int toAngle, int delayPerStep) {
+  if (fromAngle < toAngle) {
+    for (int a = fromAngle; a <= toAngle; a++) {
+      sun.write(a);
+      delay(delayPerStep);
+    }
+  } else {
+    for (int a = fromAngle; a >= toAngle; a--) {
+      sun.write(a);
+      delay(delayPerStep);
+    }
+  }
+}
